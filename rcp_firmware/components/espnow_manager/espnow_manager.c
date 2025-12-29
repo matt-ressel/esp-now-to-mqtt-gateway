@@ -1,12 +1,11 @@
 /**
- * @file espnow_manager.c
- * @author Mateusz Ressel (https://github.com/matt-ressel)
+ * @file    espnow_manager.c
+ * @author  Mateusz Ressel (https://github.com/matt-ressel)
+ * @brief   Implementation of the ESP-NOW manager module for the RCP firmware.
  *
- * @brief Implementation of the ESP-NOW manager module for the RCP firmware.
- *
- * This file contains the logic to initialize and manage ESP-NOW communication,
- * including peer management and event handling. It sets up the necessary WiFi
- * services, ESP-NOW stack, and FreeRTOS tasks/queues for processing ESP-NOW events.
+ * @details This file contains the logic to initialize and manage ESP-NOW communication,
+ *          including peer management and event handling. It sets up the necessary WiFi
+ *          services, ESP-NOW stack, and FreeRTOS tasks/queues for processing ESP-NOW events.
  *
  * @version 0.3
  * @date    2025-12-28
@@ -33,7 +32,7 @@
 
 // Project includes
 #include "inter_chip_protocol.h"  // FOR CMD_SENSOR_DATA definition
-#include "sensor_data.h"          // Definition of sensor_data_t structure
+#include "gateway_payloads.h"          // Definition of sensor_data_t structure
 #include "uart_protocol.h"        // UART protocol functions
 
 // Logging tag for this module

@@ -1,18 +1,19 @@
 /**
- * @file espnow_manager.h
- * @author Mateusz Ressel (https://github.com/matt-ressel)
+ * @file    espnow_manager.h
+ * @author  Mateusz Ressel (https://github.com/matt-ressel)
+ * @brief   Public API for the ESP-NOW Radio Manager.
  *
- * @brief ESP-NOW Manager Header File
- *
- * This header file declares the interface for the ESP-NOW manager component,
- * which is responsible for handling ESP-NOW communication functionalities.
+ * @details This component encapsulates the low-level WiFi stack initialization
+ *          and ESP-NOW configuration. It exposes the initialization interface
+ *          required to set up the device as a dedicated Radio Co-Processor (RCP)
+ *          listening on a fixed channel.
  *
  * @version 0.1
- * @date    2025-12-20
+ * @date    2025-12-28
  *
  * @copyright Copyright (c) 2025 Mateusz Ressel. Licensed under the MIT License.
- *
  */
+
 #ifndef ESPNOW_MANAGER_H
 #define ESPNOW_MANAGER_H
 
