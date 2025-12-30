@@ -31,8 +31,10 @@
 #include "freertos/task.h"      // For FreeRTOS tasks
 
 // Project includes
+#include "gateway_payloads.h"     // Definition of sensor_data_t structure
 #include "inter_chip_protocol.h"  // FOR CMD_SENSOR_DATA definition
-#include "gateway_payloads.h"          // Definition of sensor_data_t structure
+#include "power_monitor.h"        // Power monitoring functions
+#include "time_manager.h"         // Time synchronization utilities
 #include "uart_protocol.h"        // UART protocol functions
 
 // Logging tag for this module
@@ -205,12 +207,6 @@ static void espnow_task(void* pvParameter) {
 
         // Log the received data length and MAC address
         ESP_LOGD(ESPNOW_MANAGER, "Data from " MACSTR ", Len: %d", MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
-        // Get current timestamp
-        // Ensure system time is set for this to be meaningful (e.g., via I2C command from RPi)
-        // current_timestamp = (uint32_t)time(NULL);
-        // if (current_timestamp == 0) {
-        //   ESP_LOGW(ESPNOW_MANAGER, "System time not set (timestamp is 0). Timestamps may not be meaningful yet.");
-        // }
 
         // 1. Calculate total size required for the Gateway Packet
         // Size = Header (MAC, RSSI, TS) + Payload (ESP-NOW data)
@@ -219,55 +215,53 @@ static void espnow_task(void* pvParameter) {
         // 2. Allocate temporary buffer
         uint8_t* tx_buffer = malloc(packet_size);
 
-        if (tx_buffer != NULL) {
-          uart_gateway_packet_t* pkt = (uart_gateway_packet_t*)tx_buffer;
-
-          // 3. Fill the Gateway Header
-          memcpy(pkt->mac_addr, recv_cb->mac_addr, 6);
-
-          pkt->rssi = recv_cb->rssi;
-
-          // Timestamp (RCP uptime in ms)
-          // pkt->rcp_timestamp = (uint32_t)(esp_timer_get_time() / 1000);
-          pkt->rcp_timestamp = 5748340;
-
-          // 4. Copy the RAW ESP-NOW payload (Opaque Data)
-          memcpy(pkt->payload, recv_cb->data, recv_cb->data_len);
-
-          // 5. Send via UART Protocol
-          uart_protocol_send(CMD_SENSOR_DATA, tx_buffer, packet_size);
-
-          free(tx_buffer);  // Clean up UART buffer
-        } else {
-          ESP_LOGE(ESPNOW_MANAGER, "Failed to allocate memory for UART forwarding");
+        if (tx_buffer == NULL) {
+          ESP_LOGE(ESPNOW_MANAGER, "OOM: Failed to allocate %d bytes for forwarding", packet_size);
+          free(recv_cb->data);
+          break;  // Exit case on memory allocation failure
         }
 
-        // Scenario A: Check if we are connected to the AP
-        // if (power_monitor_is_ap_connected()) {
-        //   // AP is reachable, attempt to send data via UART
-        //   sensor_data_packet_t packet;
-        //   memcpy(packet.mac_addr, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
-        //   packet.len = recv_cb->data_len;
-        //   memcpy(packet.data, recv_cb->data, recv_cb->data_len);
-        //   packet.rssi = power_monitor_get_last_rssi();  // Get last known RSSI
-        //   esp_err_t ret = uart_transport_send_sensor_data(
-        //       packet.mac_addr,
-        //       packet.data,
-        //       packet.len,
-        //       packet.rssi);
+        uart_gateway_packet_t* pkt = (uart_gateway_packet_t*)tx_buffer;
 
-        //   if (ret != ESP_OK) {
-        //     // UART send failed despite AP being reachable -> Save to NVS
-        //     // nvs_manager_save_event(EVENT_TYPE_SENSOR_DATA, &packet, sizeof(packet));
-        //   }
+        // 3. Fill the Gateway Header
+        memcpy(pkt->mac_addr, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
+        
+        // RSSI value
+        pkt->rssi = recv_cb->rssi;
 
-        // } else {
-        //   // Scenario B: AP is not reachable (Battery mode) -> Save directly to NVS
-        //   // Save the entire structure (including MAC and RSSI) so we know who sent it upon retrieval and timestamp
-        //   // nvs_manager_save_event(EVENT_TYPE_SENSOR_DATA, &packet, sizeof(packet));
-        // }
+        // Timestamp (RCP uptime in ms)
+        pkt->rcp_timestamp = time_manager_get_epoch();
+
+        // 4. Copy the RAW ESP-NOW payload (Opaque Data)
+        memcpy(pkt->payload, recv_cb->data, recv_cb->data_len);
+
+        bool sent_via_uart = false;
+
+        // Scenario A: Check if we are connected to the Host
+        if (power_monitor_is_host_connected()) {
+          ESP_LOGI(ESPNOW_MANAGER, "Host connected. Forwarding via UART.");
+          esp_err_t ret = uart_protocol_send(CMD_SENSOR_DATA, tx_buffer, packet_size);
+
+          if (ret == ESP_OK) {
+            ESP_LOGI(ESPNOW_MANAGER, "Forwarded via UART (Size: %d)", packet_size);
+            sent_via_uart = true;
+          } else {
+            ESP_LOGW(ESPNOW_MANAGER, "Host connected but UART send failed: %s. Fallback to NVS.", esp_err_to_name(ret));
+          }
+        } else {
+          ESP_LOGI(ESPNOW_MANAGER, "Host is NOT connected. Forwarding data to NVS storage.");
+          // Scenario B: Host is not reachable (Battery mode) -> Save directly to NVS
+          // Save the entire structure (including MAC and RSSI) so we know who sent it upon retrieval and timestamp
+          // nvs_manager_save_event(EVENT_TYPE_SENSOR_DATA, &packet, sizeof(packet));
+        }
+
+        if (!sent_via_uart) {
+          // nvs_manager_save_event(EVENT_TYPE_SENSOR_DATA, tx_buffer, packet_size);
+          ESP_LOGW(ESPNOW_MANAGER, "Data saved to NVS (Simulation)");
+        }
 
         // Free the dynamically allocated data buffer after processing
+        free(tx_buffer);  // Clean up UART buffer
         free(recv_cb->data);
         recv_cb->data = NULL;
         break;
@@ -280,7 +274,7 @@ static void espnow_task(void* pvParameter) {
 }
 
 static esp_err_t espnow_init(void) {
-  esp_log_level_set(ESPNOW_MANAGER, ESP_LOG_DEBUG);  // Set log level for this module to DEBUG
+  // esp_log_level_set(ESPNOW_MANAGER, ESP_LOG_DEBUG);  // Set log level for this module to DEBUG
 
   esp_err_t ret;
 
